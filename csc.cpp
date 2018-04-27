@@ -52,8 +52,8 @@ extern void csc_ARGB8888_to_NV12_NEON(unsigned char *dstY, unsigned char *dstCbC
 extern void csc_ARGB8888_to_NV21_NEON(unsigned char *dstY, unsigned char *dstCbCr, unsigned char *src, unsigned int width, unsigned int height);
 }
 
-void csc_ARGB8888_to_NV12(unsigned char *dstY, unsigned char *dstCbCr, unsigned char *src, unsigned int width, unsigned int height);
-void csc_ARGB8888_to_NV21(unsigned char *dstY, unsigned char *dstCbCr, unsigned char *src, unsigned int Width, unsigned int Height);
+void csc_ARGB8888_to_NV12(unsigned char *dstY, unsigned char *dstCbCr, unsigned char *src, unsigned int width, unsigned int height, uint32_t dstStrideY, uint32_t dstStrideUV);
+void csc_ARGB8888_to_NV21(unsigned char *dstY, unsigned char *dstCbCr, unsigned char *src, unsigned int Width, unsigned int Height, uint32_t dstStrideY, uint32_t dstStrideUV);
 
 
 #define MAX_THREAD_NUM		4
@@ -64,12 +64,17 @@ typedef struct tCSC_THREAD_PARA {
 	char 				*src;
 	char 				*dstY;
 	char 				*dstCbCr;
+
+	uint32_t 			dstStrideY;
+	uint32_t 			dstStrideUV;
+
 	uint32_t 			srcWidth;
 	uint32_t 			srcHeight;
 
 	bool				bCompleted;
 
 	void				(*pvCscFunc)(unsigned char *, unsigned char *, unsigned char *, unsigned int, unsigned int);
+	void				(*pvCscFunc_C)(unsigned char *, unsigned char *, unsigned char *, unsigned int, unsigned int, unsigned int, unsigned int);
 } CSC_THREAD_PARA;
 
 
@@ -86,26 +91,34 @@ void *thread_cscARGBToNV21(void *arg)
 	return (void *)pstCscPara;
 }
 
-int cscARGBToNV21(char *src, char *dstY, char *dstCbCr, uint32_t srcWidth, uint32_t srcHeight, uint32_t cbFirst, int32_t threadNum)
+int cscARGBToNV21(char *src, char *dstY, char *dstCbCr, uint32_t srcWidth, uint32_t srcHeight, uint32_t dstStrideY, uint32_t dstStrideUV, uint32_t cbFirst, int32_t threadNum)
 {
 	void (*pvCscFunc)(unsigned char *, unsigned char *, unsigned char *, unsigned int, unsigned int) = NULL;
+	void (*pvCscFunc_C)(unsigned char *, unsigned char *, unsigned char *, unsigned int, unsigned int, unsigned int, unsigned int) = NULL;
 
-    if( cbFirst )
-    {
+	if( cbFirst )
+	{
 #if ARM64		//	C module
-		pvCscFunc = csc_ARGB8888_to_NV12;
+		pvCscFunc_C = csc_ARGB8888_to_NV12;
 #else
-        pvCscFunc = csc_ARGB8888_to_NV12_NEON;
+		if(srcWidth != dstStrideY)
+		{
+			pvCscFunc_C = csc_ARGB8888_to_NV12;
+		}
+		else
+		{
+			pvCscFunc = csc_ARGB8888_to_NV12_NEON;
+		}
 #endif
-    }
-    else
-    {
+	}
+	else
+	{
 #if ARM64		//	C module
-        pvCscFunc = csc_ARGB8888_to_NV21;
+		pvCscFunc_C = csc_ARGB8888_to_NV21;
 #else
-        pvCscFunc = csc_ARGB8888_to_NV21_NEON;
+		pvCscFunc = csc_ARGB8888_to_NV21_NEON;
 #endif
-    }
+	}
 
 	if ((srcHeight > 320) && (threadNum > 1))
 	{
@@ -141,7 +154,14 @@ int cscARGBToNV21(char *src, char *dstY, char *dstCbCr, uint32_t srcWidth, uint3
 	}
 	else
 	{
-		pvCscFunc((unsigned char *)dstY, (unsigned char *)dstCbCr, (unsigned char *)src, srcWidth, srcHeight);
+		if(srcWidth != dstStrideY)
+		{
+			pvCscFunc_C((unsigned char *)dstY, (unsigned char *)dstCbCr, (unsigned char *)src, srcWidth, srcHeight, dstStrideY, dstStrideUV);
+		}
+		else
+		{
+			pvCscFunc((unsigned char *)dstY, (unsigned char *)dstCbCr, (unsigned char *)src, srcWidth, srcHeight);
+		}
 	}
 
 	return 0;
@@ -189,11 +209,16 @@ int cscYV12ToYV12(  char *srcY, char *srcU, char *srcV,
     return 0;
 }
 
-void csc_ARGB8888_to_NV12(unsigned char *dstY, unsigned char *dstCbCr, unsigned char *src, unsigned int Width, unsigned int Height)
+void csc_ARGB8888_to_NV12(unsigned char *dstY, unsigned char *dstCbCr, unsigned char *src, unsigned int Width, unsigned int Height, uint32_t dstStrideY, uint32_t dstStrideUV)
 {
 	int w, h, iTmp;
 
+	unsigned char *pDstY = NULL;
+	unsigned char *pDstCbCr = NULL;
+
 	for (h = 0 ; h < (int)Height ; h++) {
+		pDstY = dstY;
+		pDstCbCr = dstCbCr;
 		for (w = 0 ; w < (int)Width ; w++) {
 			unsigned char byR = *(src);
 			unsigned char byG = *(src+1);
@@ -202,30 +227,37 @@ void csc_ARGB8888_to_NV12(unsigned char *dstY, unsigned char *dstCbCr, unsigned 
 			iTmp     = (((66 * byR) + (129 * byG) + (25 * byB) + (128)) >> 8) + 16;
 			if (iTmp > 255) iTmp = 255;
 			else if (iTmp < 0) iTmp = 0;
-			*dstY    = (unsigned char)iTmp;			dstY    += 1;
+			*pDstY    = (unsigned char)iTmp;			pDstY    += 1;
 
 			if ( ((h&1)==0) && ((w&1)==0) )
 			{
 				iTmp     = (((-38 * byR) - (74 * byG) + (112 * byB) + 128) >> 8) + 128;
 				if (iTmp > 255) iTmp = 255;
 				else if (iTmp < 0) iTmp = 0;
-				*dstCbCr = (unsigned char)iTmp;		dstCbCr += 1;
+				*pDstCbCr = (unsigned char)iTmp;		pDstCbCr += 1;
 
 				iTmp     = (((112 * byR) - (94 * byG) - (18 * byB) + 128) >> 8) + 128;
 				if (iTmp > 255) iTmp = 255;
 				else if (iTmp < 0) iTmp = 0;
-				*dstCbCr = (unsigned char)iTmp;		dstCbCr += 1;
+				*pDstCbCr = (unsigned char)iTmp;		pDstCbCr += 1;
 			}
 			src     += 4;
 		}
+		dstY = dstY + dstStrideY;
+		dstCbCr = dstCbCr + dstStrideUV/2;
 	}
 }
 
-void csc_ARGB8888_to_NV21(unsigned char *dstY, unsigned char *dstCbCr, unsigned char *src, unsigned int Width, unsigned int Height)
+void csc_ARGB8888_to_NV21(unsigned char *dstY, unsigned char *dstCbCr, unsigned char *src, unsigned int Width, unsigned int Height, uint32_t dstStrideY, uint32_t dstStrideUV)
 {
 	int w, h, iTmp;
 
+	unsigned char *pDstY = NULL;
+	unsigned char *pDstCbCr = NULL;
+
 	for (h = 0 ; h < (int)Height ; h++) {
+		pDstY = dstY;
+		pDstCbCr = dstCbCr;
 		for (w = 0 ; w < (int)Width ; w++) {
 			unsigned char byR = *(src);
 			unsigned char byG = *(src+1);
@@ -234,21 +266,23 @@ void csc_ARGB8888_to_NV21(unsigned char *dstY, unsigned char *dstCbCr, unsigned 
 			iTmp     = (((66 * byR) + (129 * byG) + (25 * byB) + (128)) >> 8) + 16;
 			if (iTmp > 255) iTmp = 255;
 			else if (iTmp < 0) iTmp = 0;
-			*dstY    = (unsigned char)iTmp;			dstY    += 1;
+			*pDstY    = (unsigned char)iTmp;			pDstY    += 1;
 
 			if ( ((h&1)==0) && ((w&1)==0) )
 			{
 				iTmp     = (((112 * byR) - (94 * byG) - (18 * byB) + 128) >> 8) + 128;
 				if (iTmp > 255) iTmp = 255;
 				else if (iTmp < 0) iTmp = 0;
-				*dstCbCr = (unsigned char)iTmp;		dstCbCr += 1;
+				*pDstCbCr = (unsigned char)iTmp;		pDstCbCr += 1;
 
 				iTmp     = (((-38 * byR) - (74 * byG) + (112 * byB) + 128) >> 8) + 128;
 				if (iTmp > 255) iTmp = 255;
 				else if (iTmp < 0) iTmp = 0;
-				*dstCbCr = (unsigned char)iTmp;		dstCbCr += 1;
+				*pDstCbCr = (unsigned char)iTmp;		pDstCbCr += 1;
 			}
 			src     += 4;
 		}
+		dstY = dstY + dstStrideY;
+		dstCbCr = dstCbCr + dstStrideUV/2;
 	}
 }
