@@ -10,9 +10,6 @@ LOCAL_SRC_FILES := csc.cpp
 	
 LOCAL_SHARED_LIBRARIES := liblog libutils libion
 
-ANDROID_VERSION_STR := $(subst ., ,$(PLATFORM_VERSION))
-ANDROID_VERSION_MAJOR := $(firstword $(ANDROID_VERSION_STR))
-
 LOCAL_C_INCLUDES += system/core/libion/include
 
 LOCAL_SRC_FILES_arm += \
@@ -21,7 +18,13 @@ LOCAL_SRC_FILES_arm += \
 
 LOCAL_MODULE := libnx_csc
 
+ANDROID_VERSION_STR := $(PLATFORM_VERSION)
+ANDROID_VERSION := $(firstword $(ANDROID_VERSION_STR))
+ifeq ($(ANDROID_VERSION), 9)
+LOCAL_VENDOR_MODULE := true
+else
 LOCAL_MODULE_TAGS := optional
+endif
 
 LOCAL_32_BIT_ONLY := true
 
