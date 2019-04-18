@@ -1,0 +1,27 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "46e80997_15b90d6a",
+        "filename": "Android.mk",
+        "patchSetId": 1
+      },
+      "lineNbr": 10,
+      "author": {
+        "id": 1015509
+      },
+      "writtenOn": "2019-04-18T02:23:10Z",
+      "side": 1,
+      "message": "please delete dummy space.",
+      "range": {
+        "startLine": 10,
+        "startChar": 0,
+        "endLine": 10,
+        "endChar": 1
+      },
+      "revId": "de8f01bfda75333441ebd70963cc2fd15ca9b91a",
+      "serverId": "d5d70762-12d0-45a1-890d-524b12d3f735",
+      "unresolved": false
+    }
+  ]
+}
